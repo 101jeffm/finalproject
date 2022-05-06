@@ -1,14 +1,15 @@
 package basepng
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"finalproject/basemodels"
 	"finalproject/baseutils"
 	"fmt"
 	"hash/crc32"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -137,7 +138,7 @@ func (pi *PngInfo) Marshal() *bytes.Buffer {
 	return by
 }
 
-//Not Needed, Remove later
+//Find Ancillary Chunks
 func (pi *PngInfo) checkCritType() string {
 	fChar := string([]rune(pi.chunkTypeToString())[0])
 	if fChar == strings.ToUpper(fChar) {
@@ -146,65 +147,146 @@ func (pi *PngInfo) checkCritType() string {
 	return "Ancillary"
 }
 
+//See if Offset if valid
+func isValidOff(s string, ancil []string) bool {
+	for _, ss := range ancil {
+		if ss == s {
+			return true
+		}
+	}
+	return false
+}
+
 //Process bytes after png header
-func (pi *PngInfo) PngProcess(buff *bytes.Reader, md *basemodels.CmdLineArgs) {
+func (pi *PngInfo) PngProcess(buff *bytes.Reader) {
 	//Start with Validation
 	pi.ValidatePng(buff)
 
-	if (md.Offset != "") && (md.Encode == false && md.Decode == false) {
-		//not encoding or decoding
-		var p PngInfo
-		p.Chunk.Data = []byte(md.Payload)
-		p.Chunk.Type = p.StrToInt(md.Type)
-		p.Chunk.Size = p.CreateSize()
-		p.Chunk.CRC = p.CreateCRC()
-		buffp := p.Marshal()
-		buffpp := buffp.Bytes()
-		fmt.Printf("Payload Original: % X\n", []byte(md.Payload))
-		fmt.Printf("Payload : % X\n", p.Chunk.Data)
-		baseutils.WriteData(buff, md, buffpp)
+	var code string
+	var key string
+	var message string
+	var offset string
+	var ty string
+	ancil := make([]string, 0)
+
+	scanner := bufio.NewReader(os.Stdin)
+
+	count := 1
+	chunkType := ""
+	endChunkType := "IEND" //last type represented before eof for png
+
+	fmt.Println("--------------------------------------------------")
+	fmt.Print("Would you like to encode or decode this image(E/D)?: ")
+	fmt.Scanln(&code)
+	if code != "E" && code != "D" {
+		fmt.Println("Invalid entry, default to Encode")
+		code = "E"
 	}
-	if (md.Offset != "") && md.Encode { //If encoding
-		var p PngInfo
-		p.Chunk.Data = baseutils.EncoderDecoder([]byte(md.Payload), md.Key)
-		p.Chunk.Type = p.StrToInt(md.Type)
-		p.Chunk.Size = p.CreateSize()
-		p.Chunk.CRC = p.CreateCRC()
-		buffp := p.Marshal()
-		buffpp := buffp.Bytes()
-		fmt.Printf("Payload Original: % X\n", []byte(md.Payload))
-		fmt.Printf("Payload Encode: % X\n", p.Chunk.Data)
-		baseutils.WriteData(buff, md, buffpp)
+
+	fmt.Println("--------------------------------------------------")
+	fmt.Print("Xor or Aes Method(X/A)?: ")
+	fmt.Scanln(&ty)
+	if ty != "X" && ty != "A" {
+		fmt.Println("Invalid entry, default to Xor")
+		ty = "X"
 	}
-	if (md.Offset != "") && md.Decode { //If Decoding
-		var p PngInfo
-		offset, _ := strconv.ParseInt(md.Offset, 10, 64)
-		buff.Seek(offset, 0)
-		p.ChunkRead(buff)
-		ogData := p.Chunk.Data
-		p.Chunk.Data = baseutils.EncoderDecoder(p.Chunk.Data, md.Key)
-		p.Chunk.CRC = p.CreateCRC()
-		buffp := p.Marshal()
-		buffpp := buffp.Bytes()
-		fmt.Printf("Payload Original: % X\n", ogData)
-		fmt.Printf("Payload Decode: % X\n", p.Chunk.Data)
-		baseutils.WriteData(buff, md, buffpp)
+
+	fmt.Println("--------------------------------------------------")
+	fmt.Print("Please enter your message key: ")
+	fmt.Scanln(&key)
+	if key == "" {
+		fmt.Println("Invalid entry, default to key")
+		key = "key"
 	}
-	if md.Meta {
-		count := 1
-		chunkType := ""
-		endChunkType := "IEND" //last type represented before eof for png
-		//Evaluates chunk type until eof for png
+
+	if code == "E" { //If encoding
+		var p PngInfo
 		for chunkType != endChunkType {
-			fmt.Println("---- Chunk # " + strconv.Itoa(count) + " ----")
+			offset = "0x"
 			pi.GetOffset(buff)
-			fmt.Printf("Chunk Offset: %#02x\n", pi.Offset)
 			pi.ChunkRead(buff)
-			fmt.Printf("Chunk Length: %s bytes\n", strconv.Itoa(int(pi.Chunk.Size)))
-			fmt.Printf("Chunk Type: %s\n", pi.chunkTypeToString())
-			fmt.Printf("Chunk Importance: %s\n", pi.checkCritType())
+
+			//Not picking correct chunks...
+			//For splitting into several bytes -- want to take first 2 Ancillary chunks to store
+			//if pi.checkCritType() == "Ancillary" {
+			//	offset = offset + strconv.FormatInt(pi.Offset, 16)
+			//	ancil = append(ancil, offset)
+			//}
+			//Defaulting to chunk IEOF since that works...
+			if pi.chunkTypeToString() == endChunkType {
+				offset = offset + strconv.FormatInt(pi.Offset, 16)
+				ancil = append(ancil, offset)
+			}
 			chunkType = pi.chunkTypeToString()
 			count++
 		}
+
+		fmt.Println("--------------------------------------------------")
+		if len(ancil) == 1 {
+			fmt.Println("Offset defaulted to: " + ancil[0])
+			offset = ancil[0]
+		} else {
+			fmt.Println(strings.Join(ancil, ", "))
+			fmt.Print("Pick an offset from the list above: ")
+			fmt.Scanln(&offset)
+			//for !isValidOff(offset, ancil) {
+			//	fmt.Print("Invalid choice, pick again: ")
+			//	fmt.Scanln(&offset)
+			//}
+
+		}
+
+		byteOffset, _ := strconv.ParseInt(offset, 0, 64)
+		offset = strconv.FormatInt(byteOffset, 10)
+		fmt.Println("--------------------------------------------------")
+		fmt.Print("Please enter your message to encode: ")
+		//can now read entire line for message
+		message, _ = scanner.ReadString('\n')
+		if message == "" {
+			log.Fatal("Cannot encode.")
+		} else if ty == "A" && len(message) < 16 {
+			log.Fatal("Cannot encode.")
+		}
+
+		p.Chunk.Data = baseutils.EncoderDecoder([]byte(message), key, ty, code)
+		p.Chunk.Type = p.StrToInt("rNDm")
+		p.Chunk.Size = p.CreateSize()
+		p.Chunk.CRC = p.CreateCRC()
+		buffp := p.Marshal()
+		buffpp := buffp.Bytes()
+		fmt.Println("--------------------------------------------------")
+		fmt.Printf("Payload Original: % X\n", []byte(message))
+		fmt.Printf("Payload Encode: % X\n", p.Chunk.Data)
+		fmt.Println("--------------------------------------------------")
+		baseutils.WriteData(buff, offset, false, buffpp)
+	} else { //If Decoding
+		var p PngInfo
+		fmt.Println("--------------------------------------------------")
+		fmt.Print("Please enter your offset: ")
+		fmt.Scanln(&offset)
+
+		if offset == "" {
+			fmt.Println("Invalid offset, default to 0x85258")
+			offset = "0x85258"
+		}
+
+		byteOffset, _ := strconv.ParseInt(offset, 0, 64)
+		offset = strconv.FormatInt(byteOffset, 10)
+
+		off, _ := strconv.ParseInt(offset, 10, 64)
+		buff.Seek(off, 0)
+		p.ChunkRead(buff)
+		ogData := p.Chunk.Data
+		p.Chunk.Data = baseutils.EncoderDecoder(p.Chunk.Data, key, ty, code)
+		p.Chunk.CRC = p.CreateCRC()
+		buffp := p.Marshal()
+		buffpp := buffp.Bytes()
+		fmt.Println("--------------------------------------------------")
+		fmt.Printf("Payload Original: % X\n", ogData)
+		fmt.Printf("Payload Decode: % X\n", p.Chunk.Data)
+		fmt.Printf("Original Message: %s\n", string(p.Chunk.Data))
+		fmt.Println("--------------------------------------------------")
+
+		baseutils.WriteData(buff, offset, true, buffpp)
 	}
 }
