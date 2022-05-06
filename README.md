@@ -60,3 +60,9 @@ Current Successes
 -Partway implementation of Aes  
 -Scattering bits across chunks in png explored. Currently get incorrect offsets when using this option, exporing further.   
 -JPEF and PDF files researches, further implementation needed.   
+
+Future Iteration(s) 
+-
+-Implement another image file type  
+-Determine issues/fix Aes implemntation (only taking 16 bits and encrypting) 
+-Refine offset selection 
