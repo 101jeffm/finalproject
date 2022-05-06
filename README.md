@@ -14,7 +14,9 @@ Enter the location where the png image is located
 Ex. apple.png
 
 "Would you like to encode or decode this image(E/D)?:"
+
 Enter E to encode and D to decode, can only do one at a time, defaults to encode if an invalid input is detected
+
 Ex. D (capitalization does not matter) 
 
 "Xor or Aes Method(X/A)?:"
